@@ -17,7 +17,7 @@ while not wifi.isconnected() :
   pass
 print(wifi.ifconfig())
 
-BLYNK_AUTH = 'b0b68a5aeeb040c7850dd80bd555e44a'
+BLYNK_AUTH = 'b0b68a5ae--Token--50dd80bd555e44a'
 # Initialize Blynk
 blynk = BlynkLib.Blynk(BLYNK_AUTH)
 # Start Blynk (this call should never return)
