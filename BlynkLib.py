@@ -1,5 +1,3 @@
-
-
 # The MIT License (MIT)
 # 
 # Copyright (c) 2015-2018 Volodymyr Shymanskyy
@@ -154,7 +152,7 @@ class Blynk:
         self._do_connect = connect
         self._ssl = ssl
         self.state = DISCONNECTED
-        #print(LOGO)
+        print(LOGO)
 
     def _format_msg(self, msg_type, *args):
         data = ('\0'.join(map(str, args))).encode('ascii')
@@ -332,6 +330,8 @@ class Blynk:
 
     def on_connect(self, func):
         self._on_connect = func
+    def on_disconnect(self, func):
+        self._on_disconnect = func
 
     def set_user_task(self, task, ms_period):
         if ms_period % TASK_PERIOD_RES != 0:
@@ -344,103 +344,110 @@ class Blynk:
 
     def disconnect(self):
         self._do_connect = False
-
     def run(self):
-        self._start_time = time.ticks_ms()
-        self._task_millis = self._start_time
-        self._hw_pins = {}
-        self._rx_data = b''
-        self._msg_id = 1
-        self._timeout = None
-        self._tx_count = 0
-        self._m_time = 0
-        self.state = DISCONNECTED
+          self._start_time = time.ticks_ms()
+          self._task_millis = self._start_time
+          self._hw_pins = {}
+          self._rx_data = b''
+          self._msg_id = 1
+          self._timeout = None
+          self._tx_count = 0
+          self._m_time = 0
+          self.state = DISCONNECTED
+          while True:
+            try:
+              while self.state != AUTHENTICATED:
+                  self._run_task()
+                  if self._do_connect:
+                      try:
+                          self.state = CONNECTING
+                          if self._ssl:
+                              import ssl
+                              print('SSL: Connecting to %s:%d' % (self._server, self._port))
+                              ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_SEC)
+                              self.conn = ssl.wrap_socket(ss, cert_reqs=ssl.CERT_REQUIRED, ca_certs='/flash/cert/ca.pem')
+                          else:
+                              print('TCP: Connecting to %s:%d' % (self._server, self._port))
+                              self.conn = socket.socket()
+                          self.conn.connect(socket.getaddrinfo(self._server, self._port)[0][4])
+                      except:
+                          self._close('connection with the Blynk servers failed')
+                          continue
 
-        while True:
-            while self.state != AUTHENTICATED:
-                self._run_task()
-                if self._do_connect:
-                    try:
-                        self.state = CONNECTING
-                        if self._ssl:
-                            import ssl
-                            print('SSL: Connecting to %s:%d' % (self._server, self._port))
-                            ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_SEC)
-                            self.conn = ssl.wrap_socket(ss, cert_reqs=ssl.CERT_REQUIRED, ca_certs='/flash/cert/ca.pem')
-                        else:
-                            print('TCP: Connecting to %s:%d' % (self._server, self._port))
-                            self.conn = socket.socket()
-                        self.conn.connect(socket.getaddrinfo(self._server, self._port)[0][4])
-                    except:
-                        self._close('connection with the Blynk servers failed')
-                        continue
+                      self.state = AUTHENTICATING
+                      hdr = struct.pack(HDR_FMT, MSG_LOGIN, self._new_msg_id(), len(self._token))
+                      print('Blynk connection successful, authenticating...')
+                      self._send(hdr + self._token, True)
+                      data = self._recv(HDR_LEN, timeout=MAX_SOCK_TO)
+                      if not data:
+                          self._close('Blynk authentication timed out')
+                          continue
 
-                    self.state = AUTHENTICATING
-                    hdr = struct.pack(HDR_FMT, MSG_LOGIN, self._new_msg_id(), len(self._token))
-                    print('Blynk connection successful, authenticating...')
-                    self._send(hdr + self._token, True)
-                    data = self._recv(HDR_LEN, timeout=MAX_SOCK_TO)
-                    if not data:
-                        self._close('Blynk authentication timed out')
-                        continue
+                      msg_type, msg_id, status = struct.unpack(HDR_FMT, data)
+                      if status != STA_SUCCESS or msg_id == 0:
+                          self._close('Blynk authentication failed')
+                          continue
 
-                    msg_type, msg_id, status = struct.unpack(HDR_FMT, data)
-                    if status != STA_SUCCESS or msg_id == 0:
-                        self._close('Blynk authentication failed')
-                        continue
-
-                    self.state = AUTHENTICATED
-                    self._send(self._format_msg(MSG_INTERNAL, 'ver', '0.2.0', 'buff-in', 4096, 'h-beat', HB_PERIOD, 'dev', sys.platform+'-py'))
-                    print('Access granted, happy Blynking!')
-                    if self._on_connect:
+                      self.state = AUTHENTICATED
+                      self._send(self._format_msg(MSG_INTERNAL, 'ver', '0.2.0', 'buff-in', 4096, 'h-beat', HB_PERIOD, 'dev', sys.platform+'-py'))
+                      print('Access granted, happy Blynking!')
+                      if self._on_connect:
                         self._on_connect()
-                else:
-                    self._start_time = sleep_from_until(self._start_time, TASK_PERIOD_RES)
+                      else:
+                        self._on_disconnect()
+                  else:
+                      self._start_time = sleep_from_until(self._start_time, TASK_PERIOD_RES)
 
-            self._hb_time = 0
-            self._last_hb_id = 0
-            self._tx_count = 0
-            while self._do_connect:
-                try:
-                    data = self._recv(HDR_LEN, NON_BLK_SOCK)
-                except:
-                    pass
-                if data:
-                    msg_type, msg_id, msg_len = struct.unpack(HDR_FMT, data)
+              self._hb_time = 0
+              self._last_hb_id = 0
+              self._tx_count = 0
+              while self._do_connect:
+                  try:
+                      data = self._recv(HDR_LEN, NON_BLK_SOCK)
+                  except:
+                      pass
+                  if data:
+                      msg_type, msg_id, msg_len = struct.unpack(HDR_FMT, data)
 
-                    if msg_id == 0:
-                        self._close('invalid msg id %d' % msg_id)
-                        break
-                    # TODO: check length
-                    if msg_type == MSG_RSP:
-                        if msg_id == self._last_hb_id:
-                            self._last_hb_id = 0
-                    elif msg_type == MSG_PING:
-                        self._send(struct.pack(HDR_FMT, MSG_RSP, msg_id, STA_SUCCESS), True)
-                    elif msg_type == MSG_HW or msg_type == MSG_BRIDGE:
-                        data = self._recv(msg_len, MIN_SOCK_TO)
-                        if data:
-                            self._handle_hw(data)
-                    elif msg_type == MSG_INTERNAL: # TODO: other message types?
-                        break
-                    elif msg_type == UN or msg_type == UN1 or msg_type == UN2: # TODO: other message types?
-                        pass
-                    else:
-                        #print('--msg_type %d' % msg_type)
-                        #print('--msg_id %d' % msg_id)
-                        #print('--msg_len %d' % msg_len)
-                        self._close('unknown message type %d' % msg_type)
-                        break
-                else:
-                    self._start_time = sleep_from_until(self._start_time, IDLE_TIME_MS)
-                if not self._server_alive():
-                    self._close('Blynk server is offline')
-                    break
-                self._run_task()
+                      if msg_id == 0:
+                          self._close('invalid msg id %d' % msg_id)
+                          break
+                      # TODO: check length
+                      if msg_type == MSG_RSP:
+                          if msg_id == self._last_hb_id:
+                              self._last_hb_id = 0
+                      elif msg_type == MSG_PING:
+                          self._send(struct.pack(HDR_FMT, MSG_RSP, msg_id, STA_SUCCESS), True)
+                      elif msg_type == MSG_HW or msg_type == MSG_BRIDGE:
+                          data = self._recv(msg_len, MIN_SOCK_TO)
+                          if data:
+                              self._handle_hw(data)
+                      elif msg_type == MSG_INTERNAL: # TODO: other message types?
+                          break
+                      elif msg_type == UN or msg_type == UN1 or msg_type == UN2: # TODO: other message types?
+                          pass
+                      else:
+                          #print('--msg_type %d' % msg_type)
+                          #print('--msg_id %d' % msg_id)
+                          #print('--msg_len %d' % msg_len)
+                          self._close('unknown message type %d' % msg_type)
+                          break
+                  else:
+                      self._start_time = sleep_from_until(self._start_time, IDLE_TIME_MS)
+                  if not self._server_alive():
+                      self._close('Blynk server is offline')
+                      break
+                  self._run_task()
 
-            if not self._do_connect:
-                self._close()
-                print('Blynk disconnection requested by the user')
+              if not self._do_connect:
+                  self._close()
+                  print('Blynk disconnection requested by the user')
+            except:
+              print ("Error !")
+              time.sleep(2)
+            
+
+
 
 
 
