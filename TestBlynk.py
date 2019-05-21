@@ -10,7 +10,7 @@ d = dht.DHT22(machine.Pin(19))
 w=ipstw.IPSTW()
 w.begin()
 
-WIFI_SSID = "INEX01_2.4GHz"
+WIFI_SSID = "INEXWiFi"
 WIFI_PASS = "123456789-0"
 
 wifi = network.WLAN(network.STA_IF)
@@ -21,7 +21,7 @@ while not wifi.isconnected() :
   pass
 print(wifi.ifconfig())
 
-BLYNK_AUTH = 'b0b68a5aeeb040c7850dd80bd555e44a'
+BLYNK_AUTH = 'b0b68a5aeeb50dd80bd555e44a'
 # Initialize Blynk
 blynk = BlynkLib.Blynk(BLYNK_AUTH)
 # Start Blynk (this call should never return)
@@ -61,32 +61,3 @@ def my_user_task():
 blynk.set_user_task(my_user_task, 2000)
 
 blynk.run()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
